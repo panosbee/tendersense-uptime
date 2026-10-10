@@ -1,0 +1,38 @@
+name: tendersense-uptime
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Health check (3 προσπάθειες, 20s απόσταση)
+        run: |
+          set -u
+          LAST=""
+          for i in 1 2 3; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 20 https://tendersense.gr/api/health 2>/dev/null || echo 000)
+            ROOT=$(curl -s -o /dev/null -w "%{http_code}" -m 20 https://tendersense.gr 2>/dev/null || echo 000)
+            echo "try $i: api=$CODE root=$ROOT"
+            if [ "$CODE" = "200" ] && [ "$ROOT" = "200" ]; then
+              echo "OK"
+              exit 0
+            fi
+            LAST="api=$CODE root=$ROOT"
+            sleep 20
+          done
+          echo "DOWN after 3 tries: $LAST"
+          if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+            curl -s -m 15 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=🚨 TenderSense DOWN (εξωτερικός έλεγχος GitHub) — $LAST — ώρα UTC $(date -u '+%d/%m %H:%M') — https://tendersense.gr" \
+              > /dev/null || true
+          fi
+          exit 1
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
